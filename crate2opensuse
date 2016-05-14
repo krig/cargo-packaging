@@ -1,0 +1,69 @@
+#!/usr/bin/env python
+#
+# crate2opensuse
+#
+# Tools for packaging crates for openSUSE
+#
+import argparse
+import sys
+import json
+import cargoapi
+
+_commands = {}
+
+
+def command(fn):
+    _commands[fn.__name__] = fn
+    return None
+
+
+def args_parser():
+    epilog = "Commands: %s" % (", ".join(_commands.keys()))
+    parser = argparse.ArgumentParser(description='RPM Builder for Cargo crates', epilog=epilog)
+    parser.add_argument('-s', '--suffix', type=str, default="",
+                        help="Version suffix for packaging multiple versions of a crate")
+    parser.add_argument('command', metavar='COMMAND', type=str, help="Sub-command")
+    parser.add_argument('name', metavar='NAME', type=str, help="Crate name")
+    parser.add_argument('version', metavar='VERSION', type=str, nargs='?', help="Crate version")
+    return parser
+
+
+@command
+def update(args):
+    pass
+
+
+@command
+def versions(args):
+    meta = cargoapi.fetch_crate_metadata(args.name)
+    for version in meta["versions"]:
+        print(version["num"])
+
+
+@command
+def metadata(args):
+    print(json.dumps(cargoapi.fetch_crate_metadata(args.name)))
+
+@command
+def crate(args):
+    if args.version is None:
+        raise ValueError("Expected VERSION")
+    with open("%s-%s.crate" % (args.name, args.version), "w") as f:
+        f.write(cargoapi.download_crate(args.name, args.version))
+
+
+if __name__ == "__main__":
+    parser = args_parser()
+    args = parser.parse_args()
+
+    if args.command not in _commands:
+        parser.print_help()
+    else:
+        try:
+            _commands[args.command](args)
+        except ValueError as e:
+            print >>sys.stderr, "Error: %s" % (e)
+            sys.exit(1)
+        except IOError as e:
+            print >>sys.stderr, "Error: %s" % (e)
+            sys.exit(1)
