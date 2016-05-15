@@ -44,12 +44,27 @@ def args_parser():
 
 
 @command
+def mkpac(args):
+    """
+    Create a new RPM package for the crate.
+    Version is optional, newest version will be used if not given.
+    """
+    pass
+
+
+@command
 def update(args):
+    """
+    Update an RPM package to the latest released version of the crate.
+    """
     pass
 
 
 @command
 def versions(args):
+    """
+    List available versions of a crate.
+    """
     meta = cargoapi.fetch_crate_metadata(args.name)
     for version in meta["versions"]:
         print(version["num"])
@@ -57,10 +72,16 @@ def versions(args):
 
 @command
 def metadata(args):
+    """
+    Print JSON metadata for a crate.
+    """
     print(json.dumps(cargoapi.fetch_crate_metadata(args.name)))
 
 @command
 def crate(args):
+    """
+    Download and save the crate tarball for a specific crate and version.
+    """
     if args.version is None:
         raise ValueError("Expected VERSION")
     with open("%s-%s.crate" % (args.name, args.version), "w") as f:
