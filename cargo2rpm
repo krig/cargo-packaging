@@ -92,6 +92,8 @@ if __name__ == "__main__":
     parser = args_parser()
     args = parser.parse_args()
 
+    print args
+    sys.exit(0)
     if args.command not in _commands:
         parser.print_help()
     else:

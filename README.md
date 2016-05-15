@@ -4,10 +4,10 @@ This repository contains a set of tools and rpm macros intended to
 make it easy to package rust projects using the cargo package manager
 for openSUSE.
 
-The basic concept is this: Packaging a new crate should be as close as
+The basic concept is this: Packaging a crate should be as close as
 possible to a one-liner:
 
-        crate2opensuse my-crate 1.0.0
+        cargo2rpm mkpac my-crate 1.0.0
 
 There's some things the tool might not be able to figure out such as
 license, but in general this should then produce everything needed to
@@ -29,7 +29,7 @@ to crates.io.
 
 The way this is done practically is via the `cargo-packaging` rpm
 which packages this repository, which also contains a series of rpm
-macros. The `crate2opensuse` tool then edits the .spec file so that it
+macros. The `cargo2rpm` tool then edits the .spec file so that it
 uses these macros, which make sure to unpack the crate in the right
 location and update the index appropriately.
 
@@ -60,13 +60,13 @@ rebuilt when the crate is installed or removed.
 If multiple versions of a crate should be available, then pass
 --suffix "1" or --suffix "2_0" for example:
 
-        crate2opensuse --suffix 2_0 my-crate 2.0.0
+        cargo2rpm mkpac my-crate 2.0.0 --suffix 2_0
 
 ## Updating a crate
 
 To update a crate when a new version is released, just use
 
-        crate2opensuse --update my-crate
+        cargo2rpm update my-crate
 
 ## cargo index format
 
