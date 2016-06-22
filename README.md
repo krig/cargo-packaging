@@ -13,6 +13,14 @@ There's some things the tool might not be able to figure out such as
 license, but in general this should then produce everything needed to
 submit a new crate to `devel:languages:rust:crates`.
 
+## TODO
+
+* Package and submit `rustc` stable, beta and nightly for Tumbleweed
+* Package `cargo` using cargo-bootstrap and update to the latest version
+* Look into multirust
+* Package the crates.io index as a separate package, plus automation to update
+* Implement `cargo2spec` 
+
 ## Crates and RPM packages
 
 The idea is to package crates as very light rpm wrappers around the
