@@ -8,5 +8,5 @@ setup(name='cargoapi',
       author_email='kgronlund@suse.com',
       url='https://github.com/krig/cargo-packaging',
       packages=['cargoapi'],
-      scripts=['cargo2rpm', 'cargo-bootstrap'],
+      scripts=['cargo2rpm'],
       install_requires=['dulwich', 'requests', 'pytoml'])
