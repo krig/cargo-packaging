@@ -514,7 +514,7 @@ class Crate(object):
             (c1, e1, e2) = runner(bcmd, benv)
 
             if runner.returncode() != 0:
-                raise RuntimeError('build command failed: %s' % runner.returncode())
+                raise RuntimeError('build command failed: %s\nOutput: %s' % (runner.returncode(), runner.output())
 
             bcmd += c1
             benv = dict(benv, **e1)
