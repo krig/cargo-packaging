@@ -97,7 +97,7 @@ def download_crate(name, version):
     """
     Download the crate tarball
     """
-    url = "/".join(_CRATES_API, name, version, "download")
+    url = "/".join([_CRATES_API, name, version, "download"])
     r = requests.get(url)
     r.raise_for_status()
     return r.content
