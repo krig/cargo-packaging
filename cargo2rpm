@@ -19,11 +19,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import print_function
+import os
+import platform
 import argparse
 import sys
 import json
 import cargoapi
+import pytoml
 
+
+_VERSION = '0.1.0'
 _commands = {}
 
 
@@ -33,32 +39,102 @@ def command(fn):
 
 
 def args_parser():
-    epilog = "Commands: %s" % (", ".join(_commands.keys()))
-    parser = argparse.ArgumentParser(description='RPM Builder for Cargo crates', epilog=epilog)
-    parser.add_argument('-s', '--suffix', type=str, default="",
-                        help="Version suffix for packaging multiple versions of a crate")
-    parser.add_argument('command', metavar='COMMAND', type=str, help="Sub-command")
-    parser.add_argument('name', metavar='NAME', type=str, help="Crate name")
-    parser.add_argument('version', metavar='VERSION', type=str, nargs='?', help="Crate version")
+    parser = argparse.ArgumentParser(description='RPM Builder for Cargo crates')
+    parser.add_argument('--version', action='store_true', help='Print version of the tool')
+    subparsers = parser.add_subparsers(dest='command')
+    create_parser = subparsers.add_parser('create')
+    create_parser.add_argument('-s', '--suffix', type=str, default="",
+                               help="Version suffix for packaging multiple versions of a crate")
+    create_parser.add_argument('name', metavar='NAME', type=str, help="Crate name")
+    create_parser.add_argument('version', metavar='VERSION', type=str, nargs='?', help="Crate version")
+
+    versions_parser = subparsers.add_parser('versions')
+    versions_parser.add_argument('name', metavar='NAME', type=str, help="Crate name")
+    metadata_parser = subparsers.add_parser('metadata')
+    metadata_parser.add_argument('name', metavar='NAME', type=str, help="Crate name")
+    crate_parser = subparsers.add_parser('crate')
+    crate_parser.add_argument('-o', '--out', type=str, help='Target filename [default: <name>-<version>.crate]')
+    crate_parser.add_argument('-f', '--force', action='store_true', help='Always download crate even if target file exists')
+    crate_parser.add_argument('name', metavar='NAME', type=str, help="Crate name")
+    crate_parser.add_argument('version', metavar='VERSION', type=str, help="Crate version")
+
+    subparsers.add_parser('fetch')
+    build_parser = subparsers.add_parser('build')
+    # TODO..
+    deftarget = 'x86_64-unknown-linux-gnu'
+    if platform.machine() != 'x86_64':
+        deftarget = 'i686-unknown-linux-gnu'
+    build_parser.add_argument('--target-dir', type=str, default="out",
+                              help="specify the path for storing built dependency libs")
+    build_parser.add_argument('--crate-dir', type=str, default="crates",
+                              help="Directory with crates for dependencies")
+    build_parser.add_argument('--target', type=str, default=deftarget,
+                              help="target triple for machine we're bootstrapping for")
+    build_parser.add_argument('--blacklist', type=str, default="",
+                              help="space-separated list of crates to skip")
+    build_parser.add_argument('--include-optional', type=str, default="",
+                              help="space-separated list of optional crates to include")
+
     return parser
 
 
 @command
-def mkpac(args):
+def create(args):
     """
     Create a new RPM package for the crate.
     Version is optional, newest version will be used if not given.
+    Downloads the crate file and creates a .spec file.
     """
-    pass
+    meta = cargoapi.fetch_crate_metadata(args.name)
+    if not args.version:
+        args.version = meta["versions"][0]["num"]
+    fname = "%s-%s.crate" % (args.name, args.version)
+    if not os.path.isfile(fname):
+        with open(fname, "wb") as f:
+            print("Downloading %s %s to %s..." % (args.name, args.version, fname))
+            f.write(cargoapi.download_crate(args.name, args.version))
+    print("Create spec file...")
+
+@command
+def fetch(args):
+    if not os.path.isfile('Cargo.lock'):
+        print("Cargo.lock not found: Use 'cargo build' to generate Cargo.lock file")
+        sys.exit(1)
+    tomlfile = open('Cargo.toml', 'rb')
+    lockfile = open('Cargo.lock', 'rb')
+    toml = pytoml.load(tomlfile)
+    lock = pytoml.load(lockfile)
+    print("Building %s %s" % (lock['root']['name'], lock['root']['version']))
+    i = 100
+    sources = []
+    for pkg in lock['package']:
+        if 'source' in pkg and pkg['source'].startswith('registry+'):
+            fname = '%s-%s.crate' % (pkg['name'], pkg['version'])
+            if not os.path.isfile(fname):
+                with open(fname, "wb") as f:
+                    print("Downloading %s %s to %s..." % (pkg['name'], pkg['version'], fname))
+                    data, url = cargoapi.download_crate(pkg['name'], pkg['version'])
+                    sources.append("Source%03d:  %s" % (i, url))
+                    i = i + 1
+                    f.write(data)
+    # TODO: update spec file
+    for source in sources:
+        print(source)
+
 
 
 @command
-def update(args):
+def build(args):
     """
-    Update an RPM package to the latest released version of the crate.
+    Build a rust bin project using the sources, Cargo.lock and a cache of crates.
     """
-    pass
-
+    from cargoapi import bootstrap
+    bootstrap.build(
+        target_dir=args.target_dir,
+        crate_dir=args.crate_dir,
+        target=args.target,
+        blacklist=args.blacklist.split(),
+        optionals=args.include_optional.split())
 
 @command
 def versions(args):
@@ -77,31 +153,35 @@ def metadata(args):
     """
     print(json.dumps(cargoapi.fetch_crate_metadata(args.name)))
 
+
 @command
 def crate(args):
     """
     Download and save the crate tarball for a specific crate and version.
     """
-    if args.version is None:
-        raise ValueError("Expected VERSION")
-    with open("%s-%s.crate" % (args.name, args.version), "w") as f:
+    fname = "%s-%s.crate" % (args.name, args.version)
+    if os.path.isfile(fname):
+        print("%s already exists." % (fname))
+        return
+    with open(fname, "wb") as f:
+        print("Downloading %s %s to %s..." % (args.name, args.version, fname))
         f.write(cargoapi.download_crate(args.name, args.version))
 
 
-if __name__ == "__main__":
-    parser = args_parser()
-    args = parser.parse_args()
-
-    print args
+def print_version():
+    print("cargo2rpm %s" % (_VERSION))
     sys.exit(0)
-    if args.command not in _commands:
-        parser.print_help()
-    else:
-        try:
-            _commands[args.command](args)
-        except ValueError as e:
-            print >>sys.stderr, "Error: %s" % (e)
-            sys.exit(1)
-        except IOError as e:
-            print >>sys.stderr, "Error: %s" % (e)
-            sys.exit(1)
+
+if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] == '--version':
+        print_version()
+    args = args_parser().parse_args()
+
+    try:
+        _commands[args.command](args)
+    except ValueError as e:
+        print >>sys.stderr, "Error: %s" % (e)
+        sys.exit(1)
+    except IOError as e:
+        print >>sys.stderr, "Error: %s" % (e)
+        sys.exit(1)

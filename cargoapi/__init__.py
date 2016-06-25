@@ -93,6 +93,15 @@ def fetch_crate_metadata(name):
     return r.json()
 
 
+def crate_source_url(name, version):
+    """
+    Return the url of the crate
+    """
+    url = "/".join([_CRATES_API, name, version, "download"])
+    r = requests.get(url, stream=True)
+    return r.url
+
+
 def download_crate(name, version):
     """
     Download the crate tarball
