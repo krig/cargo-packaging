@@ -11,7 +11,7 @@ _AUTHOR = "cargo-packager <packaging@opensuse.org>"
 _COMMITTER = "cargo-packager <packaging@opensuse.org>"
 
 _CRATES_API = "https://crates.io/api/v1/crates"
-_INDEX_URL = "https://github.com/rust-lang/crates.io-index/tree/master"
+_INDEX_URL = "https://raw.githubusercontent.com/rust-lang/crates.io-index/master"
 
 
 def index_for_crate(root, crate):
@@ -109,4 +109,4 @@ def download_crate(name, version):
     url = "/".join([_CRATES_API, name, version, "download"])
     r = requests.get(url)
     r.raise_for_status()
-    return r.content
+    return r.content, r.url
