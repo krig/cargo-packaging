@@ -43,6 +43,26 @@ class CrateInfo(object):
         for lnk in lnks:
             boverrides.update(cfg.get('target', {}).get(target, {}).get(lnk, {}))
 
+        depfeatures = {}
+
+        feats = cfg.get('features', None)
+        if feats is not None:
+            defaults = feats.get('default')
+            if defaults:
+                self.features.append('default')
+                for df in defaults:
+                    self.features.append(df)
+                    if df in feats:
+                        self.features.extend(feats[df])
+        for feat in self.features:
+            if '/' in feat:
+                dep, subfeat = feat.split('/', 1)
+                if dep in depfeatures:
+                    depfeatures[dep].append(subfeat)
+                else:
+                    depfeatures[dep] = [subfeat]
+        self.features = [x for x in self.features if '/' not in x]
+
         bmain = False
         if bf is not None:
             build.append({
@@ -118,29 +138,28 @@ class CrateInfo(object):
         d.update(cfg.get('target', {}).get(target, {}).get('dependencies', {}))
         deps = []
         for k, v in d.iteritems():
+            newdep = None
             if type(v) is not dict:
-                deps.append({'name': k, 'req': v})
+                newdep = {'name': k, 'req': v}
             elif 'path' in v:
                 if 'version' not in v:
-                    deps.append({'name': k, 'path': os.path.join(cdir, v['path']), 'local': True, 'req': 0})
+                    newdep = {'name': k, 'path': os.path.join(cdir, v['path']), 'local': True, 'req': 0}
                 else:
                     opts = v.get('optional', False)
                     ftrs = v.get('features', [])
-                    deps.append({'name': k, 'path': v['path'], 'req': v['version'], 'features': ftrs, 'optional': opts})
+                    newdep = {'name': k, 'path': v['path'], 'req': v['version'], 'features': ftrs, 'optional': opts}
             else:
                 opts = v.get('optional', False)
                 ftrs = v.get('features', [])
-                deps.append({'name': k, 'req': v['version'], 'features': ftrs, 'optional': opts})
+                newdep = {'name': k, 'req': v['version'], 'features': ftrs, 'optional': opts}
 
-        feats = cfg.get('features', None)
-        if feats is not None:
-            defaults = feats.get('default')
-            if defaults:
-                self.features.append('default')
-                for df in defaults:
-                    self.features.append(df)
-                    if df in feats:
-                        self.features.extend(feats[df])
+            if newdep is not None:
+                if k in depfeatures:
+                    if 'features' in newdep:
+                        newdep['features'].extend(depfeatures[k])
+                    else:
+                        newdep['features'] = depfeatures[k]
+                deps.append(newdep)
 
         self.name = name
         self.version = ver
@@ -287,9 +306,10 @@ class Crate(object):
     CRATES = {}
     BUILT = {}
 
-    def __init__(self, crate, ver, cdir, build, dep_info):
-        self._crate = crate
-        self._version = ver
+    def __init__(self, name, ver, crateinfo, cdir, build, dep_info):
+        self.name = name
+        self.version = ver
+        self.crateinfo = crateinfo
         self._dir = cdir
         self._dep_env = {}
         self._dep_info = dep_info
@@ -303,18 +323,18 @@ class Crate(object):
         self._extra_flags = []
 
         for lock in Crate.PACKAGES:
-            if lock['name'] == crate and lock['version'] == ver:
+            if lock['name'] == name and lock['version'] == ver:
                 self._lock = lock
                 break
         else:
-            raise ValueError("No lock data for %s-%s" % (crate, ver))
+            raise ValueError("No lock data for %s-%s" % (name, ver))
 
         self._deps = []
         dstr = re.compile(r'(\S+)\s+(\S+)(?:\s+\((.+)\))?')
         for ldep in self._lock.get('dependencies', []):
             m = dstr.match(ldep)
             if not m:
-                raise ValueError("Failed to parse dependency for %s: %s" % (crate, ldep))
+                raise ValueError("Failed to parse dependency for %s: %s" % (name, ldep))
             ldep_name = m.group(1)
             ldep_ver = m.group(2)
             for dep in dep_info:
@@ -327,7 +347,7 @@ class Crate(object):
                     self._deps.append(ndep)
 
     def namever(self):
-        return "%s-%s" % (self._crate, self._version)
+        return "%s-%s" % (self.name, self.version)
 
     def unpack_crate(self, name, version):
         namever = '%s-%s' % (name, version)
@@ -345,7 +365,7 @@ class Crate(object):
         print("Build", namever)
         crate = Crate.CRATES[namever]
         extern, env, extra_flags = crate.build(self.namever(), out_dir, info.get('features', []))
-        self._dep_env[crate._crate] = env
+        self._dep_env[crate.name] = env
         self._extra_flags += extra_flags
         return extern
 
@@ -377,15 +397,15 @@ class Crate(object):
                     deps += crateinfo.deps
                     build = crateinfo.build
 
-                features = crateinfo.features
-                dbg('Features for %s: %s' % (name, features))
+                features = [x for x in crateinfo.features]
+                dbg('Features for %s: %s %s (parent %s)' % (name, features, d.get('features', []), self.crateinfo.features))
 
                 optional = d.get('optional', False)
-                if optional and d['name'] not in Crate.OPTIONALS and d['name'] not in features:
-                    dbg('Skipping optional dep %s' % d['name'])
+                if optional and d['name'] not in Crate.OPTIONALS and d['name'] not in self.crateinfo.features:
+                    dbg('Skipping optional dep %s for %s' % (d['name'], self.namever()))
                     continue
 
-                dcrate = Crate(name, version, cratedir, build, deps)
+                dcrate = Crate(name, version, crateinfo, cratedir, build, deps)
                 if dcrate.namever() in Crate.CRATES:
                     dcrate = Crate.CRATES[dcrate.namever()]
                 Crate.UNRESOLVED.append(dcrate)
@@ -400,6 +420,13 @@ class Crate(object):
                 # add 'default' if default_features is true
                 if d.get('default_features', True):
                     tftrs.append('default')
+
+                dbg("features: %s" % (features))
+                dbg("tftrs: %s" % (tftrs))
+
+                for tf in tftrs:
+                    if tf not in features:
+                        features.append(tf)
 
                 # if isinstance(ftrs, dict):
                 #     # add any available features that are activated by the
@@ -430,11 +457,11 @@ class Crate(object):
         self._builddeps[namever] = {'features': [str(x) for x in features]}
 
     def build(self, by, out_dir, features=[]):
-        output_name = flatdash(self._crate)
-        extra_filename = '-%s' % (self._version.replace('.', '_'))
-        output_name = os.path.join(out_dir, 'lib%s%s.rlib' % (flatdash(self._crate), extra_filename))
+        output_name = flatdash(self.name)
+        extra_filename = '-%s' % (self.version.replace('.', '_'))
+        output_name = os.path.join(out_dir, 'lib%s%s.rlib' % (flatdash(self.name), extra_filename))
         if self.namever() in Crate.BUILT:
-            return ({'name': self._crate, 'lib': output_name}, self._env, self._extra_flags)
+            return ({'name': self.name, 'lib': output_name}, self._env, self._extra_flags)
 
         externs = []
 
@@ -445,7 +472,7 @@ class Crate(object):
         if os.path.isfile(output_name):
             print('Skipping %s, already built (needed by: %s)' % (self.namever(), str(by)))
             Crate.BUILT[self.namever()] = by
-            return ({'name': self._crate, 'lib': output_name}, self._env, self._extra_flags)
+            return ({'name': self.name, 'lib': output_name}, self._env, self._extra_flags)
 
         # build the environment for subcommands
         tenv = dict(os.environ)
@@ -459,12 +486,12 @@ class Crate(object):
         env['DEBUG'] = '0'
         env['PROFILE'] = 'release'
         env['CARGO_MANIFEST_DIR'] = self._dir
-        sv = semver.Semver(self._version)
+        sv = semver.Semver(self.version)
         env['CARGO_PKG_VERSION_MAJOR'] = sv['major']
         env['CARGO_PKG_VERSION_MINOR'] = sv['minor']
         env['CARGO_PKG_VERSION_PATCH'] = sv['patch']
         env['CARGO_PKG_VERSION_PRE'] = sv['prerelease'] or ''
-        env['CARGO_PKG_VERSION'] = self._version
+        env['CARGO_PKG_VERSION'] = self.version
         for f in features:
             env['CARGO_FEATURE_%s' % f.upper().replace('-', '_')] = '1'
         for l, e in self._dep_env.iteritems():
@@ -475,13 +502,13 @@ class Crate(object):
         # create the builders, build scripts are first
         cmds = []
         for b in self._build:
-            v = str(self._version).replace('.', '_')
+            v = str(self.version).replace('.', '_')
             cmd = ['rustc']
             #cmd.append(os.path.join(self._dir, b['path']))
             cmd.append(b['path'])
             cmd.append('--crate-name')
             if b['type'] == 'lib':
-                b.setdefault('name', self._crate)
+                b.setdefault('name', self.name)
                 cmd.append(b['name'].replace('-', '_'))
                 cmd.append('--crate-type')
                 cmd.append('lib')
@@ -559,7 +586,7 @@ class Crate(object):
                 self._env['DEP_%s_%s' % (key.upper(), k.upper())] = v
 
         Crate.BUILT[self.namever()] = str(by)
-        return ({'name': self._crate, 'lib': output_name}, self._env, bcmd)
+        return ({'name': self.name, 'lib': output_name}, self._env, bcmd)
 
 
 
@@ -589,7 +616,7 @@ def build(target_dir, crate_dir, target, blacklist, optionals):
     Crate.OPTIONALS = optionals
     Crate.PACKAGES.append(lock_data['root'])
     Crate.PACKAGES.extend(package_versions)
-    cargo_crate = Crate(name, ver, rootdir, build, deps)
+    cargo_crate = Crate(name, ver, crateinfo, rootdir, build, deps)
     Crate.UNRESOLVED.append(cargo_crate)
     while len(Crate.UNRESOLVED) > 0:
         crate = Crate.UNRESOLVED.pop(0)
