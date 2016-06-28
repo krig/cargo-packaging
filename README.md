@@ -21,6 +21,12 @@ submit a new crate to `devel:languages:rust:crates`.
 * Package the crates.io index as a separate package, plus automation to update
 * Implement `cargo2spec` 
 
+## Useful tools
+
+* `cargo package` - Assemble package into a distributable tarball.
+* `cargo generate-lockfile` - Update `Cargo.lock` without actually building.
+* `cargo metadata` - Generate information about project and dependencies.
+
 ## Crates and RPM packages
 
 The idea is to package crates as very light rpm wrappers around the
