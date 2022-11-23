@@ -357,7 +357,26 @@ class Crate(object):
             cfp = os.path.join(Crate.CACHE, '%s.crate' % (namever))
             with tarfile.open(cfp) as tf:
                 dbg('unpacking %s.crate to %s...' % (namever, Crate.CACHE))
-                tf.extractall(path=Crate.CACHE)
+                def is_within_directory(directory, target):
+                    
+                    abs_directory = os.path.abspath(directory)
+                    abs_target = os.path.abspath(target)
+                
+                    prefix = os.path.commonprefix([abs_directory, abs_target])
+                    
+                    return prefix == abs_directory
+                
+                def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+                
+                    for member in tar.getmembers():
+                        member_path = os.path.join(path, member.name)
+                        if not is_within_directory(path, member_path):
+                            raise Exception("Attempted Path Traversal in Tar File")
+                
+                    tar.extractall(path, members, numeric_owner=numeric_owner) 
+                    
+                
+                safe_extract(tf, path=Crate.CACHE)
             return os.path.join(Crate.CACHE, namever)
         return None
 
